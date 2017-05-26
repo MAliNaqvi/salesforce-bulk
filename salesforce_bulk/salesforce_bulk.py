@@ -164,20 +164,12 @@ class SalesforceBulk(object):
             external_id_name=external_id_name,
         )
 
-        http = Http()
-        response, content = http.request(
-            "{self.endpoint}/job".format(self=self),
-            "POST",
-            headers=self.get_headers({
-                # http://salesforce.stackexchange.com/a/49273
-                'SOAPAction': operation,
-            }),
-            body=doc,
-        )
+        response = requests.post("{self.endpoint}/job".format(self=self),
+                      headers=self.get_headers({'SOAPAction': operation}),
+                      data=doc)
 
-        self.check_status(response, content)
-
-        tree = ET.fromstring(content)
+        self.check_requests_status(response.status_code, response.content)
+        tree = ET.fromstring(response.content)
         job_id = tree.findtext("{{{self.jobNS}}}id".format(self=self))
         self.jobs[job_id] = job_id
 
@@ -188,18 +180,16 @@ class SalesforceBulk(object):
             message = HttpErrorMessage(message=content)
             self.raise_error(message, response.status)
 
+    def check_requests_status(self, status, content):
+        if status >= 400:
+            message = HttpErrorMessage(message=content)
+            self.raise_error(message, status)
+
     def close_job(self, job_id):
-        http = Http()
-        response, content = http.request(
-            "{self.endpoint}/job/{job_id}".format(
-                self=self,
-                job_id=job_id,
-            ),
-            "POST",
-            headers=self.get_headers(),
-            body=self.create_close_job_doc(),
-        )
-        self.check_status(response, content)
+        uri = "{self.endpoint}/job/{job_id}".format(self=self,
+                                                    job_id=job_id)
+        response = requests.post(uri, headers=self.get_headers(), data=self.create_close_job_doc())
+        self.check_requests_status(response.status_code, response.content)
 
     def abort_job(self, job_id):
         """Abort a given bulk job"""
@@ -267,22 +257,15 @@ class SalesforceBulk(object):
             job_id = self.create_query_job(
                 re.search(re.compile("from (\w+)", re.I), soql).group(1),
             )
-        http = Http()
         uri = "{self.endpoint}/job/{job_id}/batch".format(
             self=self,
             job_id=job_id,
         )
         headers = self.get_headers({"Content-Type": "text/csv"})
-        response, content = http.request(
-            uri,
-            method="POST",
-            body=soql,
-            headers=headers,
-        )
+        response = requests.post(uri, data=soql, headers=headers)
+        self.check_requests_status(response.status_code, response.content)
 
-        self.check_status(response, content)
-
-        tree = ET.fromstring(content)
+        tree = ET.fromstring(response.content)
         batch_id = tree.findtext("{{{self.jobNS}}}id".format(self=self))
 
         self.batches[batch_id] = job_id
@@ -439,16 +422,16 @@ class SalesforceBulk(object):
 
         job_id = job_id or self.lookup_job_id(batch_id)
 
-        http = Http()
         uri = "{self.endpoint}/job/{job_id}/batch/{batch_id}".format(
             self=self,
             job_id=job_id,
             batch_id=batch_id,
         )
-        response, content = http.request(uri, headers=self.get_headers())
-        self.check_status(response, content)
 
-        tree = ET.fromstring(content)
+        response = requests.get(uri, headers=self.get_headers())
+        self.check_requests_status(response.status_code, response.content)
+
+        tree = ET.fromstring(response.content)
         result = {}
         for child in tree:
             result[re.sub("{.*?}", "", child.tag)] = child.text
